@@ -1,0 +1,3 @@
+root: "/analysis_dir"
+email: "email@example.com"
+bwa_hg19_index: "/lab/data/reference/human/hg19/index/bwa/current/hg19"

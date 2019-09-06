@@ -1,0 +1,22 @@
+__default__:
+  time: "05:00:00"
+  mem: "16G"
+  cpus: 1
+  name: "JOBNAME.{rule}.{wildcards}"
+  output: "logs/{rule}.{wildcards}.out"
+
+trim_adapters:
+  time: "10:00:00"
+  cpus: 8
+
+map_fastq:
+  cpus: 4
+
+prune_and_index:
+  cpus: 4
+
+clean_and_deduplicate_bam_1:
+  cpus: 4
+
+mark_duplicates:
+  cpus: 4

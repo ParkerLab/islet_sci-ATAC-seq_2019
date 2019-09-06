@@ -1,0 +1,217 @@
+import os
+import glob
+from functools import partial
+from collections import defaultdict
+
+# sanity check; exit early if paths are not set properly
+ROOT = config['root'] or os.getenv('ROOT')
+if not ROOT:
+  print("Project ROOT not set. Check config. Exiting.")
+  exit(1)
+
+_data = partial(os.path.join, ROOT, 'data')
+_work = partial(os.path.join, ROOT, 'work')
+
+_map_dir = partial(_work, 'mapping')
+
+#
+# contains list of target output files
+_final = []
+
+# extend output
+#
+_final.extend([
+  _map_dir('split_bams', 'snatac-seq.task.OK')
+])
+
+#
+# main rule, specify list of files to be generated
+rule all:
+  input:
+    _final
+
+# sub-rules
+
+#
+# Process single-cell BAM files
+#
+
+rule fix_barcodes:
+  """Check if barcodes are in the whitelist. If not, compute edit distance with
+  the nearest barcode and based on a threshold, replace that barcode with the
+  one from whitelist or else mark them __CTF__ (not found within threshold) or
+  __AMBIG__ (more then one match found)."""
+  input:
+    fq1 = _data('raw', '{name}.1.fq.gz'),
+    fq2 = _data('raw', '{name}.2.fq.gz')
+  output:
+    fq1 = _map_dir('fastq', '{name}.1.fixed.fq.gz'),
+    fq2 = _map_dir('fastq', '{name}.2.fixed.fq.gz')
+  params:
+    out_dir = _data('fastq')
+  log:
+    _map_dir('fastq', '{name}.split.log')
+  shell:
+    # Use Py2 version until FIXED
+    """
+      python2 bin/sc_atac_10bpbarcode_split.py \
+        -1 {input.fq1} \
+        -2 {input.fq2} \
+        -O1 {output.fq1} \
+        -O2 {output.fq2} \
+        -L {log} \
+        -Z \
+        -X
+    """
+
+
+rule trim_adapters:
+  input:
+    fq1 = _map_dir('fastq', '{name}.1.fixed.fq.gz'),
+    fq2 = _map_dir('fastq', '{name}.2.fixed.fq.gz')
+  output:
+    fq1_p = _map_dir('fastq', '{name}.1.trimmed.paired.fastq.gz'),
+    fq1_up = _map_dir('fastq', '{name}.1.trimmed.unpaired.fastq.gz'),
+    fq2_p = _map_dir('fastq', '{name}.2.trimmed.paired.fastq.gz'),
+    fq2_up = _map_dir('fastq', '{name}.2.trimmed.unpaired.fastq.gz')
+  params:
+    adapters = 'src/NexteraPE-PE.fa'
+  threads: 8
+  log:
+    _map_dir('fastq', '{name}.trimmomatic.log')
+  shell:
+    """
+      TrimmomaticPE \
+        -threads {threads} \
+        -trimlog {log} \
+        {input.fq1} {input.fq2} \
+        {output.fq1_p} {output.fq1_up} {output.fq2_p} {output.fq2_up} \
+        ILLUMINACLIP:{params.adapters}:2:30:10:1:true TRAILING:3 SLIDINGWINDOW:4:10 MINLEN:20 \
+        &> {log}
+
+      pigz {log}
+    """
+
+
+# Using bwa-mem inplace of bowtie2
+rule map_fastq:
+  input:
+    first = _map_dir('fastq', '{name}.1.trimmed.paired.fastq.gz'),
+    second = _map_dir('fastq', '{name}.2.trimmed.paired.fastq.gz')
+  output:
+    _map_dir('bwa', '{name}.bam')
+  params:
+    genome = config['bwa_hg19_index'],
+  threads: 8
+  log:
+    bwa = _map_dir('bwa', '{name}.bwa.log'),
+    samtools = _map_dir('bwa', '{name}.samtools.log')
+  shell:
+    """
+    ionice -c2 bwa mem  \
+        -I 200,200,5000 \
+        -M              \
+        -t {threads}    \
+        {params.genome} \
+        {input.first}   \
+        {input.second}  \
+        2> {log.bwa}    \
+      | samtools sort -m 4G -@ {threads} -O bam -o {output} - 2> {log.samtools}
+
+      samtools index {output}
+    """
+
+
+rule prune_and_index:
+  """Remove reads that did not map uniquely to autosomes or sex chromosomes
+  only, have a mapping quality below 10. Further, remove all secondary and
+  supplementary alignments.
+  """
+  input:
+    _map_dir('bwa', '{name}.bam')
+  output:
+    bam = _map_dir('pruned', '{name}.pruned.bam'),
+    bai = _map_dir('pruned', '{name}.pruned.bam.bai')
+  params:
+    mapq = 10,
+    chroms = [ *['chr' + str(x) for x in range(1, 23)], 'chrX', 'chrY' ]
+  threads: 4
+  shell:
+    """
+      samtools view -@4 -h -f3 -F 12 -F 256 -F 2048 -q {params.mapq} {input} {params.chroms}       \
+        | grep -v _CTF_                                                                            \
+        | grep -v _AMBIG_                                                                          \
+        | samtools sort -m 4G -O bam -o {output.bam} -
+
+      samtools index {output.bam}
+    """
+
+
+rule deduplicate_and_index_bam:
+  """Using custom script, remove reads with __AMBIG__ or __CTF__ in the read
+  name. Ideally would want to use Picard with appropriate LB id in each
+  read."""
+  input:
+    _map_dir('pruned', '{name}.pruned.bam'),
+  output:
+    bam = _map_dir('nodups', '{name}.nodups.bam'),
+    bai = _map_dir('nodups', '{name}.nodups.bam.bai')
+  log:
+    _map_dir('nodups', '{name}.nodups.log')
+  shell:
+    """
+      python bin/scatac_true_dedup.py --bam {input} --output {output.bam} &> {log}
+      samtools index -@ 2 {output}
+    """
+
+
+rule count_reads_and_get_cutoff:
+  input:
+    nodups = _map_dir('nodups', '{name}.nodups.bam'),
+    index = _data('raw', 'SCatac_jim.NIH_Islets_all_indices_indextable.txt')
+  output:
+    counts = _map_dir('prune-bg-barcodes', '{name}.barcode.counts.txt'),
+    filtered = _map_dir('prune-bg-barcodes', '{name}.pruned.readdepth.indextable.txt')
+  params:
+    cutoff = "auto",
+    prefix = "Islets"
+  shell:
+    """
+      python bin/scatac_barcode_read_counter.py \
+        --bam {input.nodups} \
+        --index {input.index} \
+        --output {output.counts}
+
+      Rscript bin/scatac_filter_barcodes.R \
+        --counts {output.counts} \
+        --cutoff {params.cutoff} \
+        --prefix {params.prefix} \
+        --output {output.filtered}
+    """
+
+
+rule split_bam_to_barcodes:
+  input:
+    nodups = _map_dir('nodups', '{name}.nodups.bam'),
+    index = _map_dir('prune-bg-barcodes', '{name}.pruned.readdepth.indextable.txt')
+  output:
+    touch(_map_dir('split_bams', '{name}.task.OK'))
+  shell:
+    """
+      python bin/scatac_split_bam.py \
+        --bam {input.nodups} \
+        --index {input.index} \
+        --out_dir {output}
+    """
+
+# Snakemake notification
+onerror:
+  print("Error: Snakemake aborted!")
+  shell("mail -s 'Snakemake Job Error: See log inside!' {config[email]} < {log}")
+
+
+onsuccess:
+  print("Success: Snakemake completed!")
+  shell("mail -s 'Snakemake Job Completed: Have a Beer!' {config[email]} < {log}")
+
+#vim: syntax=snakemake
