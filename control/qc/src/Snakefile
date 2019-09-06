@@ -1,0 +1,241 @@
+import os
+import glob
+from functools import partial
+from collections import defaultdict
+
+# sanity check; exit early if paths are not set properly
+ROOT = config['root'] or os.getenv('ROOT')
+
+SHM_ROOT = '/dev/shm/'
+
+if not ROOT:
+  print("Project ROOT not set. Check config. Exiting.")
+  exit(1)
+
+_data = partial(os.path.join, ROOT, 'data')
+_work = partial(os.path.join, ROOT, 'work')
+_shm_work = partial(os.path.join, SHM_ROOT, 'work')
+
+_map_dir = partial(_work, 'mapping')
+_qc_dir = partial(_work, 'qc')
+_qc_shm_dir = partial(_shm_work, 'qc')
+
+
+def get_barcodes(indextable):
+  import pandas as pd
+  table = pd.read_table(indextable, names=['Barcode', 'Sample', 'Total_Reads'])
+  return table['Barcode']
+
+#
+# contains list of target output files
+_final = []
+
+# extend output
+#
+
+_final.extend([
+    _qc_dir('aggregate', 'gb', 'snatac-seq.normalized.bw'),
+    _qc_dir('aggregate', 'snatac-seq.mkarv.log'),
+    _qc_dir('single', 'mkarv.log'),
+    _qc_dir('single', 'metrics', 'snatac-seq_barcode-metrics.txt'),
+])
+
+
+localrules: all
+
+#
+# main rule, specify list of files to be generated
+rule all:
+  input:
+    _final
+
+# sub-rules
+
+rule create_aggregate:
+  input:
+    nodups = _map_dir('nodups', '{name}.nodups.bam'),
+    index = _map_dir('prune-bg-barcodes', '{name}.pruned.readdepth.indextable.txt')
+  output:
+    bam = _qc_dir('aggregate', 'bam', '{name}.bam'),
+    bai = _qc_dir('aggregate', 'bam', '{name}.bam.bai')
+  params:
+    out_dir = _qc_dir('aggregate', 'bam')
+  threads: 2
+  shell:
+    """
+      python bin/create_aggregate_clusters.py \
+        --bam {input.nodups} \
+        --index {input.index} \
+        --out_dir {params.out_dir}
+
+      samtools index -@ 2 {output.bam}
+      samtools flagstat -@ 2 {output.bam} > {output.bam}.flagstat
+    """
+
+rule bamTobed:
+  input:
+    _qc_dir('aggregate', 'bam', '{name}.bam')
+  output:
+    _qc_dir('aggregate', 'bam2bed', '{name}.bed')
+  shell:
+    """
+      bedtools bamtobed -i {input} > {output}
+    """
+
+rule call_merged_peaks:
+  input:
+    _qc_dir('aggregate', 'bam2bed', '{name}.bed')
+  output:
+    _qc_dir('aggregate', 'peaks', '{name}_treat_pileup.bdg'),
+    _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak'),
+  params:
+    name = '{name}',
+    out_dir= _qc_dir('aggregate', 'peaks')
+  log:
+    _qc_dir('aggregate', 'peaks', '{name}.macs2.out')
+  shell:
+    """
+      macs2 callpeak \
+        --outdir {params.out_dir} \
+        -t {input} \
+        -n {params.name} \
+        -f BED \
+        -g hs \
+        --nomodel \
+        --shift -100 \
+        --extsize 200 \
+        --seed 2018 \
+        -B \
+        --broad \
+        --keep-dup all \
+        --SPMR \
+        &> {log}
+    """
+
+rule peak_filter:
+  input:
+    _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak')
+  output:
+    _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak.noblacklist')
+  shell:
+    """
+      mappabilityFilter -i {input} -g hg19 > {output}
+    """
+
+rule convert_bdg_to_bw:
+  input:
+    bdg = _qc_dir('aggregate', 'peaks', '{name}_treat_pileup.bdg')
+  output:
+    bw = _qc_dir('aggregate', 'gb', '{name}.normalized.bw')
+  params:
+    chrom_sizes = config['hg19_chrom_sizes']
+  shell:
+    # bdgTobw is a wrapper around bedGraphToBigWig that sorts input
+    """bdgTobw {input.bdg} {params.chrom_sizes} {output.bw}"""
+
+rule ataqv_aggregate:
+  input:
+    bam = _qc_dir('aggregate', 'bam', '{name}.bam'),
+    peak_file = _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak.noblacklist')
+  output:
+    metrics = _qc_dir('aggregate', 'ataqv', '{name}.json.gz'),
+    out = _qc_dir('aggregate', 'ataqv', '{name}.ataqv.out')
+  params:
+    name = 'snATAC-seq_aggregate',
+    organism = 'human',
+    tss = config['hg19_tss_housekeeping']
+  shell:
+    """
+      ataqv --peak-file {input.peak_file} \
+        --name {wildcards.name}              \
+        --metrics-file {output.metrics}   \
+        --tss-file {params.tss}           \
+        --ignore-read-groups              \
+        {params.organism}                 \
+        {input.bam}                       \
+        > {output.out}
+    """
+
+rule ataqv_viewer_aggregate:
+  input:
+    _qc_dir('aggregate', 'ataqv', '{name}.json.gz')
+  output:
+    _qc_dir('aggregate', '{name}.mkarv.log')
+  params:
+    out_dir = directory(_qc_dir('aggregate', 'viewer')),
+  shell:
+    """
+      ionice -c2 -n7 mkarv -f -d "snATAC-seq_Islets" {params.out_dir} \
+        {input} &> {output}
+    """
+
+rule ataqv_single:
+  input:
+    bam = _qc_dir('single', 'bams', '{barcode}.bam'),
+    bai = _qc_dir('single', 'bams', '{barcode}.bam.bai'),
+    peak_file = _qc_dir('aggregate', 'peaks', 'snatac-seq_peaks.broadPeak.noblacklist')
+  output:
+    metrics = _qc_dir('single', 'ataqv', '{barcode}.json.gz'),
+    out = _qc_dir('single', 'ataqv', '{barcode}.ataqv.out')
+  params:
+    name = '{barcode}',
+    organism = 'human',
+    tss = config['hg19_tss_housekeeping']
+  shell:
+    """
+      ataqv --peak-file {input.peak_file} \
+        --name {params.name}              \
+        --metrics-file {output.metrics}   \
+        --tss-file {params.tss}           \
+        --ignore-read-groups              \
+        {params.organism}                 \
+        {input.bam}                       \
+        > {output.out}
+    """
+
+rule ataqv_viewer_single:
+  input:
+    expand(
+        _qc_dir('single', 'ataqv', '{barcode}.json.gz'),
+        barcode=get_barcodes(config['index_table'])
+    )
+  output:
+    _qc_dir('single', 'mkarv.log')
+  params:
+    input_dir = _qc_dir('single', 'ataqv'),
+    out_dir = directory(_qc_dir('single', 'viewer'))
+  shell:
+    """
+      ionice -c2 -n7 mkarv -f -d "snATAC-seq_Islets" {params.out_dir} \
+        {params.input_dir}/*.json.gz &> {output}
+    """
+
+rule extract_metrics_single:
+  input:
+    expand(
+        _qc_dir('single', 'ataqv', '{barcode}.json.gz'),
+        barcode=get_barcodes(config['index_table'])
+    )
+  output:
+    _qc_dir('single', 'metrics', 'snatac-seq_barcode-metrics.txt')
+  params:
+    input_dir = _qc_dir('single', 'ataqv')
+  shell:
+    """
+    extractAtaqvMetric2 --files {params.input_dir}/*.json.gz \
+      --metrics total_peaks hqaa hqaa_overlapping_peaks_percent total_reads tss_enrichment  \
+      --threads 4 --output {output}
+    """
+
+
+# Snakemake notification
+onerror:
+  print("Error: Snakemake aborted!")
+  shell("mail -s 'Snakemake Job Error: See log inside!' {config[email]} < {log}")
+
+
+onsuccess:
+  print("Success: Snakemake completed!")
+  shell("mail -s 'Snakemake Job Completed: Have a Beer!' {config[email]} < {log}")
+
+# vim: syntax=python

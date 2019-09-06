@@ -1,0 +1,5 @@
+root: "/analysis_dir"
+hg19_tss_housekeeping: "/path/to/hg19.tss.refseq.housekeeping.all.bed.gz"
+hg19_chrom_sizes: "/path/to/chrom_sizes"
+index_table: '/path/to/index_table.txt"
+email: "email@example.com"

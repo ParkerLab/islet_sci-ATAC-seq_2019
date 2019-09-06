@@ -1,0 +1,22 @@
+__default__:
+  time: "01:00:00"
+  mem: "8G"
+  cpus: 1
+  name: "JOBNAME.{rule}.{wildcards}"
+  output: "logs/{rule}.{wildcards}.out"
+
+create_aggregate:
+  cpus: 2
+
+peak_filter:
+  mem: "1G"
+
+convert_bdg_to_bw:
+  mem: "1G"
+
+ataqv_single:
+  time: "30:00"
+  mem: "512M"
+
+ataqv_viewer_single:
+  mem: "8G"
