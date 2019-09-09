@@ -4,6 +4,9 @@ Repository contains code and scripts accompnaying the manuscript _Single-nucleus
 in human pancreatic islets and deep learning upscaling of rare cells reveals cell-specific
 type 2 diabetes regulatory signatures_ by Rai and Quang et al (2019).
 
+Please read the [pre-print](https://www.biorxiv.org/content/10.1101/749283v1) currently
+available on BiorXiv.
+
 The code for deep learning strategy within the manuscript is available separately at [ParkerLab/PillowNet](https://github.com/ParkerLab/PillowNet).
 
 
@@ -30,3 +33,7 @@ General requirements for the code contained in this repository is listed below.
 
 If you see any bug or have any questions, feel free to contact us via GitHub issues or
 email.
+
+## Quick link
+
+![[QR Code](https://www.biorxiv.org/content/10.1101/749283v1)](https://connect.biorxiv.org/qr/qr_img.php?id=749283)
