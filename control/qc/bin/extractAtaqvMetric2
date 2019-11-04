@@ -1,0 +1,165 @@
+#!/usr/bin/env python
+#
+# Vivek Rai
+# vivekrai@umich.edu
+# (c) Parker Lab
+#
+#
+
+import argparse
+import gzip
+import json
+import multiprocessing
+from itertools import repeat
+import os
+import pathlib
+import signal
+import sys
+
+import numpy
+
+acceptable_metrics = [
+    "reads_with_mate_mapped_to_different_reference",
+    "duplicate_fraction_not_in_peaks",
+    "second_reads",
+    "total_peaks",
+    "hqaa",
+    "tss_coverage",
+    "ff_reads",
+    "library",
+    "first_reads",
+    "fragment_length_counts",
+    "reverse_reads",
+    "maximum_proper_pair_fragment_size",
+    "properly_paired_and_mapped_reads",
+    "ppm_not_in_peaks",
+    "fragment_length_counts_fields",
+    "paired_reads",
+    "duplicate_reads",
+    "peaks",
+    "reads_with_mate_too_distant",
+    "duplicate_mitochondrial_reads",
+    "hqaa_in_peaks",
+    "hqaa_tf_count",
+    "reads_mapped_and_paired_but_improperly",
+    "metrics_url",
+    "total_peak_territory",
+    "forward_reads",
+    "peak_duplicate_ratio",
+    "rr_reads",
+    "mapq_counts_fields",
+    "fr_reads",
+    "peak_percentiles",
+    "unmapped_reads",
+    "forward_mate_reads",
+    "duplicate_autosomal_reads",
+    "duplicates_not_in_peaks",
+    "description",
+    "rf_reads",
+    "median_mapq",
+    "secondary_reads",
+    "total_mitochondrial_reads",
+    "reverse_mate_reads",
+    "unmapped_mate_reads",
+    "unclassified_reads",
+    "ppm_in_peaks",
+    "mapq_counts",
+    "unpaired_reads",
+    "total_reads",
+    "mean_mapq",
+    "hqaa_mononucleosomal_count",
+    "peaks_fields",
+    "duplicates_in_peaks",
+    "supplementary_reads",
+    "name",
+    "reads_mapped_with_zero_quality",
+    "url",
+    "organism",
+    "hqaa_overlapping_peaks_percent",
+    "total_autosomal_reads",
+    "tss_enrichment",
+    "short_mononucleosomal_ratio",
+    "fragment_length_distance",
+    "qcfailed_reads",
+    "duplicate_fraction_in_peaks",
+]
+
+
+def worker_init():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def writer(gzip_m):
+    out = []
+    with gzip.open(gzip_m, "rb") as f:
+        try:
+            p_json = json.loads(f.read())[0]["metrics"]
+            library_info = p_json["library"]
+            name = p_json["name"]
+            for m in args.metrics:
+                if m == "description":
+                    out.append("{}\t{}\t'{}'\n".format(name, m, library_info[m]))
+                else:
+                    out.append("{}\t{}\t{}\n".format(name, m, p_json[m]))
+        except:
+            sys.stderr.write("Error reading {}..Skipping!\n".format(gzip_m))
+    return out
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        epilog="\n\nAcceptable metrics:\n" + "\n\t".join(acceptable_metrics)
+    )
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        required=True,
+        help="Names of metrics to extract (acceptable metrics listed below).",
+    )
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        required=True,
+        help="Ataqv metric files (see the data/ directory of ataqv output directory).",
+    )
+    parser.add_argument("--labels", nargs="+", help="Optional labels for the filenames")
+    parser.add_argument(
+        "--threads", type=int, default=1, help="Concurrent processes (default: 2)"
+    )
+    parser.add_argument(
+        "--sanitize_names",
+        action="store_true",
+        default=False,
+        help="Sanitize filenames",
+    )
+    parser.add_argument(
+        "--output", default="/dev/stdout", help="Output (default: STDOUT)"
+    )
+
+    args = parser.parse_args()
+
+    # Deduplicate the metrics list, if suer supplied it by mistake
+    args.metrics = list(set(args.metrics))
+
+    if args.threads > 1:
+        print("Using {:d} processes".format(args.threads), file=sys.stderr)
+
+    for m in args.metrics:
+        if m not in acceptable_metrics:
+            sys.stderr.write(
+                "Error: do not know how to supply metric {}; exiting\n".format(m)
+            )
+            sys.exit(1)
+
+    pool = None
+
+    if args.threads > 1:
+        pool = multiprocessing.Pool(processes=args.threads, initializer=worker_init)
+
+    written_metrics = (
+        pool and pool.starmap(writer, args.files) or (writer(x) for x in args.files)
+    )
+
+    with open(args.output, "w") as o:
+        for w in written_metrics:
+            o.writelines(w)

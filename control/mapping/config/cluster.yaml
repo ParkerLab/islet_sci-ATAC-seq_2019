@@ -11,6 +11,7 @@ trim_adapters:
 
 map_fastq:
   cpus: 4
+  time: '01-00:00'
 
 prune_and_index:
   cpus: 4

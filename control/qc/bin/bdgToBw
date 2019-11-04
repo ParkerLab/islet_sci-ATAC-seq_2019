@@ -1,0 +1,56 @@
+#! /bin/bash
+
+# Vivek Rai
+# Parker Lab
+# vivekrai@umich.edu
+#
+# April 20, 2019
+
+set -eo pipefail
+
+which bedtools &>/dev/null || { echo "bedtools not found! Download bedTools: <http://code.google.com/p/bedtools/>"; exit 1; }
+which bedGraphToBigWig &>/dev/null || { echo "bedGraphToBigWig not found! Download: <http://hgdownload.cse.ucsc.edu/admin/exe/>"; exit 1; }
+which bedClip &>/dev/null || { echo "bedClip not found! Download: <http://hgdownload.cse.ucsc.edu/admin/exe/>"; exit 1; }
+
+[[ $# -ne 3 ]] && echo "Usage: <PROG> [bdg-file] [chrom-sizes] [bw-file]" \
+               && echo "Converts Bedgraph file to Bigwig." \
+               && echo "Optionally set TMPDIR for a different scratch directory." \
+               && exit 1
+
+say() {
+  echo "$@" 2> /dev/stderr
+}
+
+# Wolverine and falcon specific; default to directory of input Bedgraph file
+if [[ -z $TMPDIR ]]; then
+  case $(hostname) in
+    wolverine | falcon)
+      TMPDIR="/localscratch"
+      ;;
+    *)
+      TMPDIR=$(dirname "$1")
+      ;;
+  esac
+fi
+
+# more sanity checks
+[[ ! -f "$1" ]] && say "$1 not found. Exiting!" && exit 1
+[[ ! -f "$2" ]] && say "$2 not found. Exiting!" && exit 1
+
+base=$(basename "$1")
+
+say "Converting $base, TMPDIR=$TMPDIR"
+
+say "Clipping and sorting bedgraph.."
+
+bedtools slop -i "$1" -g "$2" -b 0 \
+  | bedClip stdin "$2" stdout \
+  | LC_ALL=C sort -k1,1 -k2,2n > "$TMPDIR/$base.sorted.bdg"
+
+say "Converting to bigwig.."
+bedGraphToBigWig "$TMPDIR/$base.sorted.bdg" "$2" "$3"
+
+say "Cleanup.."
+unlink "$TMPDIR/$base.sorted.bdg"
+
+say "Done."

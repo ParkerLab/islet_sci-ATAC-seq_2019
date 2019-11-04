@@ -77,19 +77,13 @@ rule trim_adapters:
   params:
     adapters = 'src/NexteraPE-PE.fa'
   threads: 8
-  log:
-    _map_dir('fastq', '{name}.trimmomatic.log')
   shell:
     """
-      TrimmomaticPE \
+      trimmomatic PE \
         -threads {threads} \
-        -trimlog {log} \
         {input.fq1} {input.fq2} \
         {output.fq1_p} {output.fq1_up} {output.fq2_p} {output.fq2_up} \
-        ILLUMINACLIP:{params.adapters}:2:30:10:1:true TRAILING:3 SLIDINGWINDOW:4:10 MINLEN:20 \
-        &> {log}
-
-      pigz {log}
+        ILLUMINACLIP:{params.adapters}:2:30:10:1:true TRAILING:3 SLIDINGWINDOW:4:10 MINLEN:20
     """
 
 
@@ -102,7 +96,7 @@ rule map_fastq:
     _map_dir('bwa', '{name}.bam')
   params:
     genome = config['bwa_hg19_index'],
-  threads: 8
+  threads: 4
   log:
     bwa = _map_dir('bwa', '{name}.bwa.log'),
     samtools = _map_dir('bwa', '{name}.samtools.log')
@@ -166,6 +160,14 @@ rule deduplicate_and_index_bam:
 
 
 rule count_reads_and_get_cutoff:
+  """Count the number of reads per barcode. The list of barcode combinations that
+  went into the experiment are contained in the `indexfile`.
+
+  The step is is finally used to decide a read threshold cuttoff for removing poor quality
+  barcodes.
+
+  Indextable is available with the FASTQ files in the accession data.
+  """
   input:
     nodups = _map_dir('nodups', '{name}.nodups.bam'),
     index = _data('raw', 'SCatac_jim.NIH_Islets_all_indices_indextable.txt')

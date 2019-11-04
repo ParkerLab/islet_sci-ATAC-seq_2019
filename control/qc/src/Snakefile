@@ -26,6 +26,10 @@ def get_barcodes(indextable):
   table = pd.read_table(indextable, names=['Barcode', 'Sample', 'Total_Reads'])
   return table['Barcode']
 
+
+def get_blacklists():
+    return config.get("blacklist", [])
+
 #
 # contains list of target output files
 _final = []
@@ -117,10 +121,10 @@ rule peak_filter:
     _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak')
   output:
     _qc_dir('aggregate', 'peaks', '{name}_peaks.broadPeak.noblacklist')
+  params:
+      blacklists = lambda wildcards: " ".join(get_blacklists)
   shell:
-    """
-      mappabilityFilter -i {input} -g hg19 > {output}
-    """
+      """mappabilityFilter -i {input} -b {params.blacklists} > {output}"""
 
 rule convert_bdg_to_bw:
   input:
