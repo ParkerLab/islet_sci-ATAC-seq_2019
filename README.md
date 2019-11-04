@@ -39,7 +39,8 @@ source activate sciatac_seq
 
 ### Additional packages
 
-R scripts used in the analysis require a few dependencies.
+* [Ataqv](https://github.com/parkerlab/Ataqv)
+* R dependencies
 
 ```
 packages <- c(
