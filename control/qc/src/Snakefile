@@ -175,8 +175,8 @@ rule ataqv_viewer_aggregate:
 
 rule ataqv_single:
   input:
-    bam = _qc_dir('single', 'bams', '{barcode}.bam'),
-    bai = _qc_dir('single', 'bams', '{barcode}.bam.bai'),
+    bam = _map_dir('split_bams', '{barcode}.bam'),
+    bai = _map_dir('split_bams', '{barcode}.bam.bai')
     peak_file = _qc_dir('aggregate', 'peaks', 'snatac-seq_peaks.broadPeak.noblacklist')
   output:
     metrics = _qc_dir('single', 'ataqv', '{barcode}.json.gz'),
@@ -226,7 +226,7 @@ rule extract_metrics_single:
     input_dir = _qc_dir('single', 'ataqv')
   shell:
     """
-    extractAtaqvMetric2 --files {params.input_dir}/*.json.gz \
+    bin/extractAtaqvMetric2 --files {params.input_dir}/*.json.gz \
       --metrics total_peaks hqaa hqaa_overlapping_peaks_percent total_reads tss_enrichment  \
       --threads 4 --output {output}
     """
