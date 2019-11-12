@@ -124,7 +124,7 @@ rule peak_filter:
   params:
       blacklists = lambda wildcards: " ".join(get_blacklists)
   shell:
-      """mappabilityFilter -i {input} -b {params.blacklists} > {output}"""
+      """bin/mappabilityFilter -i {input} -b {params.blacklists} > {output}"""
 
 rule convert_bdg_to_bw:
   input:
@@ -135,7 +135,7 @@ rule convert_bdg_to_bw:
     chrom_sizes = config['hg19_chrom_sizes']
   shell:
     # bdgTobw is a wrapper around bedGraphToBigWig that sorts input
-    """bdgTobw {input.bdg} {params.chrom_sizes} {output.bw}"""
+    """bin/bdgTobw {input.bdg} {params.chrom_sizes} {output.bw}"""
 
 rule ataqv_aggregate:
   input:
