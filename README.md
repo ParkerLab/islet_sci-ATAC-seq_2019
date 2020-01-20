@@ -1,14 +1,10 @@
 ## Islet sci-ATAC-seq 2019
 
-Repository contains code and scripts accompnaying the manuscript _Single-nucleus ATAC-seq
+Repository contains code and scripts accompnaying the manuscript [_Single-nucleus ATAC-seq
 in human pancreatic islets and deep learning upscaling of rare cells reveals cell-specific
-type 2 diabetes regulatory signatures_ by Rai and Quang et al (2019).
-
-Please read the [pre-print](https://www.biorxiv.org/content/10.1101/749283v2) currently
-available on BiorXiv.
+type 2 diabetes regulatory signatures_](https://www.sciencedirect.com/science/article/pii/S2212877819309573) by Rai and Quang et al (2019) published in Molecular Metabolism.
 
 The code for deep learning strategy within the manuscript is available separately at [ParkerLab/PillowNet](https://github.com/ParkerLab/PillowNet).
-
 
 ### Bulk Islet ATAC-seq processing
 
@@ -56,7 +52,3 @@ for(package in packages) {
 
 If you see any bug or have any questions, feel free to contact us via GitHub issues or
 email.
-
-## Quick link
-
-![[QR Code](https://www.biorxiv.org/content/10.1101/749283v2)](https://connect.biorxiv.org/qr/qr_img.php?id=749283)
